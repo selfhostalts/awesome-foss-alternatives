@@ -332,6 +332,7 @@ This it not the first list of free / open source software. Here are some other l
 - [Open-source alternatives](https://opensource.builders/)
 - [PickYourTech](https://www.pickyourtech.com) - Catalog of open-source projects, categorized with detailed metadata and open-source alternatives to popular SaaS platforms.
 - [os-alt](https://code-rho-dun.vercel.app) - Directory of paid SaaS with strictly self-hostable open-source alternatives, listing setup-time score, monthly self-host cost estimate, and migration sketch per tool.
+- [SelfHostAlts](https://selfhostalts.com/) - Directory of self-hosted, open-source alternatives to popular SaaS apps, with licence, platform and repo-activity details for each tool.
 
 
 ## Other lists
