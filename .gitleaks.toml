@@ -1,0 +1,31 @@
+# Gitleaks config for the weekly flag-only scan. Extends the default gitleaks rules.
+# Allowlists = known false positives from the 17 Nov 2026 secrets sweep
+# (growth-office/hdd/SECRETS-SWEEP-2026-11-17.md): public-by-design site keys only.
+# IndexNow keys are published at /{key}.txt; analytics and verification tokens are in page HTML.
+# Anything not matched here is reported as a new finding.
+title = "selfhostalts gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "IndexNow keys (public by design): a line that names IndexNow and holds a hex key"
+regexTarget = "line"
+regexes = ['''(?i)index[_-]?now.{0,60}[0-9a-f]{8,128}''']
+
+[[allowlists]]
+description = "IndexNow key constant inside an IndexNow script"
+condition = "AND"
+paths = ['''(?i)(^|/)[^/]*indexnow[^/]*$''']
+regexTarget = "line"
+regexes = ['''(^|;)\s*KEY\s*=\s*["'][0-9a-f]{8,128}["']''']
+
+[[allowlists]]
+description = "Front-end analytics and verification tokens (public in page HTML)"
+regexTarget = "line"
+regexes = [
+  '''(?i)data-cf-beacon''',
+  '''(?i)cf[_-]?web[_-]?analytics|cfAnalytics|cfBeacon''',
+  '''(?i)google-site-verification|site[_-]?verification|msvalidate\.01|impact-site-verification''',
+  '''ca-pub-\d{10,}''',
+]
