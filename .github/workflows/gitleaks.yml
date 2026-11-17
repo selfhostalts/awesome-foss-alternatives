@@ -1,0 +1,80 @@
+# Weekly secrets scan - flag only. Never blocks anything, never in the deploy path.
+# Uses the free, open-source gitleaks binary (MIT) from GitHub Releases, pinned and checksum-verified.
+# Not gitleaks-action (that needs a paid licence for org/private repos).
+# Known false positives (public IndexNow keys, analytics and verification tokens) are allowlisted in .gitleaks.toml.
+# Opens an issue (label gitleaks-watch) only when there are findings, and comments only when the set of findings changes.
+# Path note: deploy workflows only run for site source paths, so changes to this file or .gitleaks.toml deploy nothing.
+name: Gitleaks weekly (flag only)
+"on":
+  schedule:
+    - cron: "15 6 * * 1"   # Mondays 06:15 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: gitleaks-weekly
+  cancel-in-progress: true
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_TITLE: "Gitleaks weekly: possible secret in git history"
+      ISSUE_LABEL: gitleaks-watch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks (free binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan full history (values redacted)
+        run: |
+          set +e
+          git fetch --quiet --all --tags || true
+          gitleaks git --config .gitleaks.toml --log-opts="--all --full-history" \
+            --no-banner --redact -f json -r gitleaks-report.json --exit-code 0
+          echo "gitleaks exit: $?"
+          [ -s gitleaks-report.json ] || echo "[]" > gitleaks-report.json
+      - name: Summarise and open or update issue (new findings only)
+        run: |
+          set +e
+          python3 - <<'PY'
+          import json, hashlib, os
+          data = json.load(open("gitleaks-report.json")) or []
+          fps = sorted({x.get("Fingerprint", "") for x in data})
+          digest = hashlib.sha256("\n".join(fps).encode()).hexdigest()[:16] if fps else ""
+          lines = [f"- `{x.get('RuleID')}` in `{x.get('File')}` line {x.get('StartLine')}, commit `{str(x.get('Commit',''))[:8]}`" for x in data[:100]]
+          summary = ["## Gitleaks weekly (flag only)", ""]
+          summary += [f"{len(data)} finding(s). Values are redacted.", ""] + lines if data else ["No findings (known public site keys are allowlisted in .gitleaks.toml)."]
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n".join(summary) + "\n")
+          body = summary + ["", "If a finding is a public-by-design key, add it to `.gitleaks.toml`. If it is a real secret, rotate it first, then clean history.",
+                            f"Run: {os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+                            "", f"<!-- gitleaks-digest:{digest} -->"]
+          open("issue.md", "w").write("\n".join(body) + "\n")
+          open("digest.txt", "w").write(digest)
+          print(f"{len(data)} finding(s), digest={digest or 'none'}")
+          PY
+          digest=$(cat digest.txt)
+          if [ -z "$digest" ]; then echo "No findings: no issue opened or updated."; exit 0; fi
+          gh label create "$ISSUE_LABEL" --description "Weekly gitleaks scan (flag only)" --color B60205 --force >/dev/null 2>&1 || true
+          num=$(gh issue list --state open --label "$ISSUE_LABEL" --json number --jq '.[0].number // empty')
+          if [ -z "$num" ]; then
+            gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file issue.md
+          elif gh issue view "$num" --json body,comments --jq '.body, .comments[].body' | grep -q "gitleaks-digest:$digest"; then
+            echo "Issue #$num already lists these findings: no update."
+          else
+            gh issue comment "$num" --body-file issue.md
+          fi
+          exit 0
